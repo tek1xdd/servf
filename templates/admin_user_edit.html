@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% if user %}
+  {% set title_text = "Редактирование пользователя" %}
+{% else %}
+  {% set title_text = "Новый пользователь" %}
+{% endif %}
+{% block title %}{{ title_text }}{% endblock %}
+{% block content %}
+<h2>{{ title_text }}</h2>
+
+<form method="post" style="max-width: 420px; margin-top:14px;">
+    <div>
+        <label>Логин</label><br>
+        <input type="text" name="username" value="{{ user.username if user }}">
+    </div>
+    <div style="margin-top:10px;">
+        <label>Пароль</label><br>
+        <input type="password" name="password">
+        {% if user %}
+            <div style="font-size:12px;opacity:.7;margin-top:2px;">
+                Оставь пустым, если не хочешь менять.
+            </div>
+        {% endif %}
+    </div>
+    <div style="margin-top:10px;">
+        <label>Роль</label><br>
+        {% if current_user and current_user.is_super_admin %}
+            {% set selected_role = 'user' %}
+            {% if user and user.is_super_admin %}
+                {% set selected_role = 'super_admin' %}
+            {% elif user and user.is_admin %}
+                {% set selected_role = 'admin' %}
+            {% endif %}
+
+            <select name="role"
+                    style="width:100%; padding:8px 10px; margin-top:4px; border-radius:999px;
+                           border:1px solid rgba(255,255,255,0.07);
+                           background: rgba(15, 20, 30, 0.8); color:#f3f3f3;">
+                <option value="user" {% if selected_role == 'user' %}selected{% endif %}>User</option>
+                <option value="admin" {% if selected_role == 'admin' %}selected{% endif %}>Admin</option>
+                <option value="super_admin" {% if selected_role == 'super_admin' %}selected{% endif %}>Super-admin</option>
+            </select>
+        {% else %}
+            <div style="opacity:.75; margin-top:4px; font-size:13px;">
+                User (обычный)
+            </div>
+        {% endif %}
+    </div>
+    <div style="margin-top:14px;">
+        <button class="btn" type="submit">Сохранить</button>
+        <a class="btn btn-secondary" href="{{ url_for('admin_dashboard') }}">Отмена</a>
+    </div>
+</form>
+{% endblock %}

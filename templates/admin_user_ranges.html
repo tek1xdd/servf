@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Диапазоны{% endblock %}
+{% block content %}
+<h2>Диапазоны пользователя {{ user.username }}</h2>
+
+<p style="opacity:.75; margin-top:4px;">
+    Роль: {% if user.is_super_admin %}Super-admin{% elif user.is_admin %}Admin{% else %}User{% endif %}
+</p>
+
+<form method="post" style="max-width:380px; margin-top:14px;">
+    <label>Новый диапазон</label><br>
+    <input type="text" name="range" placeholder="например 61-70 или 31-80">
+    <div style="opacity:.75; font-size:12px; margin-top:6px;">
+        Если указать большой диапазон (например <b>31-80</b>), он автоматически разобьётся по 10 номеров:
+        31-40, 41-50, ...
+    </div>
+    <div style="margin-top:10px;">
+        <button class="btn" type="submit">Добавить</button>
+    </div>
+</form>
+
+<h3 style="margin-top:18px;">Текущие диапазоны</h3>
+<ul>
+    {% for r in ranges %}
+    <li>
+        {{ r.start }}–{{ r.end }}
+        {% if current_user and current_user.is_super_admin %}
+            <a class="btn btn-secondary"
+               style="padding:2px 8px; font-size:11px; margin-left:6px;"
+               href="{{ url_for('user_range', range_id=r.id) }}">
+               Открыть
+            </a>
+        {% endif %}
+        <a class="btn btn-danger"
+           style="padding:2px 8px; font-size:11px; margin-left:6px;"
+           href="{{ url_for('admin_delete_range', range_id=r.id) }}">
+           Удалить
+        </a>
+    </li>
+    {% else %}
+    <li>Диапазоны пока не заданы.</li>
+    {% endfor %}
+</ul>
+
+<p style="margin-top:16px;">
+    <a class="btn btn-secondary" href="{{ url_for('admin_dashboard') }}">← Назад</a>
+</p>
+{% endblock %}

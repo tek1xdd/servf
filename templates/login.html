@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+{% block title %}Вход{% endblock %}
+
+{% block main %}
+
+<style>
+    .auth-root {
+        min-height: calc(100vh - 80px); /* высота экрана минус топбар */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px 16px;
+    }
+
+    .auth-card-wrap {
+        position: relative;
+        width: 100%;
+        max-width: 420px;
+    }
+
+    /* мягкое свечение вокруг карточки */
+    .auth-card-glow {
+        position: absolute;
+        inset: -2px;
+        border-radius: 24px;
+        background: linear-gradient(135deg,
+            rgba(82,179,255,0.8),
+            rgba(255,77,154,0.75)
+        );
+        opacity: 0.7;
+        filter: blur(16px);
+        z-index: -1;
+    }
+
+    .auth-card {
+        position: relative;
+        border-radius: 24px;
+        padding: 26px 22px 20px;
+        background: rgba(9, 12, 22, 0.92); /* полупрозрачная, однотонная */
+        border: 1px solid rgba(255,255,255,0.08);
+        box-shadow:
+            0 20px 55px rgba(0,0,0,0.9),
+            0 0 0 1px rgba(0,0,0,0.85);
+        backdrop-filter: blur(22px);
+        -webkit-backdrop-filter: blur(22px);
+        color: #f7f7f7;
+    }
+
+    .auth-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .auth-title {
+        margin: 0;
+        font-size: 23px;
+        letter-spacing: 0.02em;
+    }
+
+    .auth-subtitle {
+        margin: 5px 0 0;
+        font-size: 13px;
+        opacity: 0.72;
+    }
+
+    .auth-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 5px 11px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.15);
+        background: radial-gradient(circle at 0 0, rgba(255,255,255,0.16), rgba(255,255,255,0.04));
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        box-shadow:
+            0 0 0 1px rgba(0,0,0,0.75),
+            0 0 12px rgba(82,179,255,0.45);
+    }
+
+    .auth-badge-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: radial-gradient(circle, #ffffff, #52b3ff);
+        box-shadow: 0 0 10px rgba(82,179,255,0.95);
+    }
+
+    .auth-form {
+        margin-top: 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .auth-label {
+        font-size: 13px;
+        opacity: 0.86;
+    }
+
+    .auth-input-wrap {
+        margin-top: 6px;
+        position: relative;
+    }
+
+    .auth-input {
+        width: 100%;
+        padding: 9px 11px 9px 32px;
+        border-radius: 11px;
+        border: 1px solid rgba(255,255,255,0.14);
+        background: rgba(6, 9, 18, 0.95);
+        color: #f7f7f7;
+        font-size: 13px;
+        outline: none;
+        transition:
+            border-color 0.18s ease,
+            box-shadow 0.18s ease,
+            background 0.18s ease,
+            transform 0.12s ease;
+    }
+
+    .auth-input::placeholder {
+        color: rgba(255,255,255,0.35);
+    }
+
+    .auth-input:focus {
+        border-color: rgba(119,185,255,0.95);
+        box-shadow:
+            0 0 0 1px rgba(119,185,255,0.65),
+            0 0 22px rgba(119,185,255,0.35);
+        background: rgba(9, 13, 24, 0.98);
+        transform: translateY(-0.5px);
+    }
+
+    .auth-input-icon {
+        position: absolute;
+        left: 9px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 11px;
+        opacity: 0.58;
+    }
+
+    .auth-meta {
+        margin-top: 4px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        opacity: 0.65;
+        flex-wrap: wrap;
+    }
+
+    .auth-submit-btn {
+        width: 100%;
+        margin-top: 8px;
+        border-radius: 999px;
+        border: none;
+        cursor: pointer;
+        padding: 9px 12px;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        color: #fbfbfb;
+        background: linear-gradient(135deg, #52b3ff, #8ad0ff);
+        box-shadow:
+            0 14px 30px rgba(0,0,0,0.9),
+            0 0 22px rgba(82,179,255,0.8);
+        position: relative;
+        overflow: hidden;
+        transition: transform 0.1s ease, box-shadow 0.1s ease, filter 0.1s ease;
+    }
+
+    .auth-submit-btn::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(120deg, rgba(255,255,255,0.35), transparent 50%);
+        mix-blend-mode: screen;
+        opacity: 0;
+        transform: translateX(-40%);
+        transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+
+    .auth-submit-btn:hover::before {
+        opacity: 1;
+        transform: translateX(0%);
+    }
+
+    .auth-submit-btn:hover {
+        transform: translateY(-1px);
+        box-shadow:
+            0 18px 36px rgba(0,0,0,0.92),
+            0 0 26px rgba(82,179,255,0.9);
+        filter: saturate(1.05);
+    }
+
+    .auth-submit-btn:active {
+        transform: translateY(1px) scale(0.99);
+        box-shadow:
+            0 10px 22px rgba(0,0,0,0.9),
+            0 0 18px rgba(82,179,255,0.7);
+    }
+
+    .auth-submit-arrow {
+        font-size: 12px;
+        opacity: 0.9;
+    }
+
+    .auth-footer {
+        margin-top: 12px;
+        font-size: 11px;
+        opacity: 0.56;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .auth-footer span:last-child {
+        opacity: 0.7;
+    }
+
+    /* флешки только внутри панели */
+    .auth-flashes {
+        margin-top: 16px;
+    }
+
+    .auth-flash {
+        border-radius: 10px;
+        padding: 8px 10px;
+        font-size: 12px;
+        margin-bottom: 6px;
+        border: 1px solid rgba(255,255,255,0.16);
+        background: rgba(255,255,255,0.04);
+        backdrop-filter: blur(10px);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .auth-flash-icon {
+        font-size: 14px;
+        flex-shrink: 0;
+    }
+
+    .auth-flash-danger {
+        border-color: rgba(255, 106, 106, 0.9);
+        background: rgba(255, 106, 106, 0.12);
+    }
+
+    .auth-flash-success {
+        border-color: rgba(85, 214, 150, 0.9);
+        background: rgba(85, 214, 150, 0.12);
+    }
+
+    .auth-flash-info {
+        border-color: rgba(120, 176, 255, 0.9);
+        background: rgba(120, 176, 255, 0.12);
+    }
+
+    @media (max-width: 480px) {
+        .auth-card {
+            padding: 22px 18px 18px;
+        }
+    }
+</style>
+
+<div class="auth-root">
+    <div class="auth-card-wrap">
+        <div class="auth-card-glow"></div>
+
+        <div class="auth-card">
+            <div class="auth-header">
+                <div>
+                    <h2 class="auth-title">Панель ботов</h2>
+                    <p class="auth-subtitle">
+                        Получать лаве просто? не нихуа.
+                    </p>
+                </div>
+                <div class="auth-badge">
+                    <span class="auth-badge-dot"></span>
+                    <span>Dota 2 Bot</span>
+                </div>
+            </div>
+
+            {# ФЛЕШКИ — ТОЛЬКО ЗДЕСЬ #}
+            {% with messages = get_flashed_messages(with_categories=true) %}
+              {% if messages %}
+              <div class="auth-flashes">
+                {% for category, message in messages %}
+                  {% set cls = 'auth-flash' %}
+                  {% set icon = 'ℹ️' %}
+                  {% if category == 'danger' %}
+                    {% set cls = 'auth-flash auth-flash-danger' %}
+                    {% set icon = '⛔' %}
+                  {% elif category == 'success' %}
+                    {% set cls = 'auth-flash auth-flash-success' %}
+                    {% set icon = '✅' %}
+                  {% elif category == 'info' %}
+                    {% set cls = 'auth-flash auth-flash-info' %}
+                    {% set icon = 'ℹ️' %}
+                  {% endif %}
+                  <div class="{{ cls }}">
+                      <span class="auth-flash-icon">{{ icon }}</span>
+                      <span>{{ message }}</span>
+                  </div>
+                {% endfor %}
+              </div>
+              {% endif %}
+            {% endwith %}
+
+            <form method="post" class="auth-form">
+                <div>
+                    <label for="login-username" class="auth-label">Логин</label>
+                    <div class="auth-input-wrap">
+                        <span class="auth-input-icon">👤</span>
+                        <input
+                            id="login-username"
+                            type="text"
+                            name="username"
+                            autocomplete="username"
+                            class="auth-input"
+                        >
+                    </div>
+                </div>
+
+                <div>
+                    <label for="login-password" class="auth-label">Пароль</label>
+                    <div class="auth-input-wrap">
+                        <span class="auth-input-icon">🔒</span>
+                        <input
+                            id="login-password"
+                            type="password"
+                            name="password"
+                            autocomplete="current-password"
+                            class="auth-input"
+                        >
+                    </div>
+                </div>
+
+                <div class="auth-meta">
+                    <span></span>
+                    <span>Только для своих.</span>
+                </div>
+
+                <button type="submit" class="auth-submit-btn">
+                    <span>Войти в панель</span>
+                    <span class="auth-submit-arrow">➜</span>
+                </button>
+            </form>
+
+            <div class="auth-footer">
+                <span>Если не знаешь, что это — ты здесь лишний.</span>
+                <span>by tek1xdd</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

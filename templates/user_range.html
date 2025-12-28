@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+{% block title %}Диапазон {{ rng.start }}–{{ rng.end }}{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+    <div>
+        <h2 style="margin-bottom:4px;">Диапазон {{ rng.start }}–{{ rng.end }}</h2>
+        <p style="margin-bottom:0;">Управление ботами внутри этого диапазона.</p>
+    </div>
+    <div>
+        <a class="btn btn-secondary" href="{{ url_for('user_dashboard') }}">
+            ← Назад к диапазонам
+        </a>
+    </div>
+</div>
+
+<div style="margin-top:18px;">
+    <div class="tabs">
+        <a href="{{ url_for('user_range', range_id=rng.id, tab='settings') }}"
+           class="tab-link {% if tab == 'settings' %}active{% endif %}">
+            Настройка
+        </a>
+        <a href="{{ url_for('user_range', range_id=rng.id, tab='autologin') }}"
+           class="tab-link {% if tab == 'autologin' %}active{% endif %}">
+            Автовходы
+        </a>
+        <a href="{{ url_for('user_range', range_id=rng.id, tab='logs') }}"
+           class="tab-link {% if tab == 'logs' %}active{% endif %}">
+            Логи
+        </a>
+        <a href="{{ url_for('user_range', range_id=rng.id, tab='state') }}"
+           class="tab-link {% if tab == 'state' %}active{% endif %}">
+            Состояние аккаунтов
+        </a>
+    </div>
+</div>
+
+<div style="margin-top:18px;">
+
+    {% if tab == 'settings' %}
+        <div style="display:flex; flex-direction:column; gap:18px;">
+
+            <!-- Запуск бота -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <h3>Запуск бота</h3>
+                    <p style="margin-top:4px; margin-bottom:0;">
+                        МАНИМАНИМАНИМАНИ
+                    </p>
+                </div>
+
+                <form method="post"
+                      action="{{ url_for('user_range_command', range_id=rng.id) }}"
+                      style="display:flex; gap:8px; flex-wrap:wrap; margin:0;">
+                    <button class="btn" type="submit" name="action" value="startbot">
+                        Запуск бота
+                    </button>
+                    <button class="btn btn-secondary" type="submit" name="action" value="stopbot">
+                        Остановить бота
+                    </button>
+                </form>
+            </div>
+
+            <!-- Режим победа/поражение -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px%;">
+                <div>
+                    <h3>Режим победа / поражение</h3>
+                    <p style="margin-top:4px; margin-bottom:0;">
+                        Рассклад на текущую игру, можно тыкнуть и поменять. А так в 50%
+                    </p>
+                </div>
+
+                <form method="post"
+                      action="{{ url_for('user_range_game_settings', range_id=rng.id) }}"
+                      style="margin:0;">
+                    <input type="hidden" name="action" value="set_win_group">
+                    {% set win_group = rng.win_group|default('right', true) %}
+
+                    <div style="display:flex; border:2px solid #000; border-radius:6px; overflow:hidden;">
+                        <!-- Левая пятёрка -->
+                        <button type="submit" name="win_group" value="left"
+                                style="min-width:110px; padding:6px 12px; border:none;
+                                       font-weight:600; font-size:11px; line-height:1.2;
+                                       background-color: {% if win_group == 'left' %}#1f8f3a{% else %}#7b1111{% endif %};
+                                       color:#fff;">
+                            {{ rng.start }}<br>
+                            {% if win_group == 'left' %}WIN{% else %}LOOSE{% endif %}
+                        </button>
+
+                        <!-- Правая пятёрка -->
+                        <button type="submit" name="win_group" value="right"
+                                style="min-width:110px; padding:6px 12px; border:none;
+                                       font-weight:600; font-size:11px; line-height:1.2;
+                                       background-color: {% if win_group == 'right' %}#1f8f3a{% else %}#7b1111{% endif %};
+                                       color:#fff;">
+                            {{ rng.start + 5 }}<br>
+                            {% if win_group == 'right' %}WIN{% else %}LOOSE{% endif %}
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Режим привязки скрытого PTS -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <h3>Режим привязки скрытого PTS</h3>
+                    <p style="margin-top:4px; margin-bottom:0;">
+                        Выбери режим для всех аккаунтов в диапазоне.
+                    </p>
+                </div>
+
+                <form method="post"
+                      action="{{ url_for('user_range_command', range_id=rng.id) }}"
+                      style="display:flex; gap:8px; flex-wrap:wrap; margin:0;">
+                    <button class="btn" type="submit" name="action" value="novokek">
+                        Новичок (750 MMR)
+                    </button>
+                    <button class="btn btn-secondary" type="submit" name="action" value="played">
+                        Я уже играл (1600 MMR)
+                    </button>
+                </form>
+            </div>
+
+            <!-- Автонастройка -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <h4 style="margin:0;">Выполнить автонастройку на всех аккаунтах</h4>
+                    <p style="margin-top:4px; margin-bottom:0;">
+                        Запустить автоматическую настройку на всех аккаунтах одновременно.
+                    </p>
+                </div>
+
+                <form method="post"
+                      action="{{ url_for('user_range_command', range_id=rng.id) }}"
+                      style="margin:0;">
+                    <button class="btn btn-secondary" type="submit" name="action" value="autoconfig">
+                        Автонастройка
+                    </button>
+                </form>
+            </div>
+
+            <!-- Сброс счётчиков игр -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <h4 style="margin:0;">Сбросить счётчик игр</h4>
+                    <p style="margin-top:4px; margin-bottom:0;">
+                        Обнуляет количество сыгранных игр для всех аккаунтов диапазона.
+                    </p>
+                </div>
+
+                <form method="post"
+                      action="{{ url_for('user_range_game_settings', range_id=rng.id) }}"
+                      style="margin:0;">
+                    <input type="hidden" name="action" value="reset_games">
+                    <button class="btn btn-secondary" type="submit">
+                        Сбросить счётчики
+                    </button>
+                </form>
+            </div>
+        </div>
+
+    {% elif tab == 'autologin' %}
+        <h3>Автовходы</h3>
+        <p>
+            Вставь логины в формате
+            <code>login:password</code> или
+            <code>login:password:mail:password</code>,
+            по одной строке на аккаунт.
+        </p>
+        <p>
+            Первая строка пойдёт в {{ rng.start }}, вторая — в {{ rng.start + 1 }},
+            и так далее до {{ rng.end }}.
+        </p>
+
+        <form method="post"
+              action="{{ url_for('user_range_autologin_start', range_id=rng.id) }}"
+              style="margin-top:12px;">
+            <div>
+                <textarea name="accounts" rows="10"
+                          style="width:100%; resize:vertical;
+                                 padding:10px 12px;
+                                 border-radius: 12px;
+                                 border: 1px solid rgba(255,255,255,0.07);
+                                 background: rgba(15, 20, 30, 0.9);
+                                 color:#f3f3f3;
+                                 font-family: monospace;
+                                 font-size: 13px;">{{ rng.autologin_text or "" }}</textarea>
+            </div>
+            <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="btn" type="submit">Запустить автовходы</button>
+            </div>
+        </form>
+
+    {% elif tab == 'logs' %}
+        <h3>Логи</h3>
+
+        {% if not jobs and not logs %}
+            <p>Пока нет задач и логов.</p>
+        {% else %}
+
+            <!-- СНАЧАЛА ВЫВОД БОТА -->
+            <h4 style="margin-top:10px;">Вывод бота</h4>
+            <div id="logs-container"
+                 style="max-height:260px; overflow-y:auto; padding:8px 10px;
+                        background: rgba(0,0,0,0.4); border-radius:10px;
+                        font-family: monospace; font-size:12px;">
+                {% for l in logs %}
+                    <div>
+                        <span style="opacity:.6;">
+                            [{{ l.created_at.strftime('%H:%M:%S') }}]</span>
+                        <span>[{{ l.number }}]</span>
+                        <span>{{ l.message }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+
+            {% if jobs %}
+                <h4 style="margin-top:16px;">Логи автологинов (задачи)</h4>
+                <table style="margin-top:4px;" class="table">
+                    <tr>
+                        <th>ID</th>
+                        <th>Номер</th>
+                        <th>Логин</th>
+                        <th>Статус</th>
+                        <th>Сообщение</th>
+                    </tr>
+                    {% for j in jobs %}
+                    <tr>
+                        <td>{{ j.id }}</td>
+                        <td>{{ j.number }}</td>
+                        <td>{{ j.login }}</td>
+                        <td>{{ j.status }}</td>
+                        <td>{{ j.error_message }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            {% endif %}
+
+        {% endif %}
+
+    {% elif tab == 'state' %}
+        <h3>Состояние аккаунтов</h3>
+        {% if not states %}
+            <p class="muted">
+                Пока нет данных по аккаунтам. Клиенты ещё не отправили свои ID.
+            </p>
+        {% else %}
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>Номер бота</th>
+                    <th>ID аккаунта</th>
+                    <th>Lobby ID</th>
+                    <th>Сторона</th>
+                    <th>Позиция</th>
+                    <th>Режим</th>
+                    <th>Игры</th>
+                    <th>Обновлено</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for s in states %}
+                    <tr>
+                        <td>{{ s.number }}</td>
+                        <td>{{ s.steam_id }}</td>
+                        <td>
+                            {% if s.lobby_id %}
+                                {{ s.lobby_id }}
+                            {% else %}
+                                <span style="color:#777;">ожидание</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if s.side == 'tma' %}
+                                Тьма
+                            {% elif s.side == 'svet' %}
+                                Свет
+                            {% else %}
+                                <span style="color:#777;">—</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ s.last_position or "" }}</td>
+                        <td>
+                            {% if s.last_play_for_win is none %}
+                                <span style="color:#777;">—</span>
+                            {% elif s.last_play_for_win %}
+                                WIN
+                            {% else %}
+                                LOOSE
+                            {% endif %}
+                        </td>
+                        <td>{{ s.games_played or 0 }}</td>
+                        <td>{{ s.last_update.strftime("%Y-%m-%d %H:%M") if s.last_update else "" }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    {% endif %}
+</div>
+
+{% if tab == 'logs' %}
+<script>
+(function () {
+    const url = "{{ url_for('range_logs_json', range_id=rng.id) }}";
+
+    function refreshLogs() {
+        fetch(url)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.ok) return;
+                const container = document.getElementById('logs-container');
+                if (!container) return;
+
+                container.innerHTML = "";
+                for (const row of data.logs) {
+                    const div = document.createElement("div");
+                    div.innerHTML =
+                        `<span style="opacity:.6;">[${row.time}]</span> ` +
+                        `<span>[${row.number}]</span> ` +
+                        `<span>${row.message}</span>`;
+                    container.appendChild(div);
+                }
+                container.scrollTop = container.scrollHeight;
+            })
+            .catch(err => console.error("Ошибка обновления логов:", err));
+    }
+
+    refreshLogs();
+    setInterval(refreshLogs, 2000);
+})();
+</script>
+{% endif %}
+{% endblock %}

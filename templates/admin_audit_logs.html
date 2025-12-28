@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Логи действий{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+    <div>
+        <h2 style="margin-bottom:4px;">Логи действий (audit)</h2>
+        <p style="margin-bottom:0;">Видно только super-admin. Показаны последние 500 записей.</p>
+    </div>
+    <div>
+        <a class="btn btn-secondary" href="{{ url_for('admin_dashboard') }}">← Назад в админку</a>
+    </div>
+</div>
+
+<form method="get" style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+    <div style="min-width:220px; flex:1;">
+        <label>Фильтр по пользователю</label><br>
+        <input type="text" name="user" value="{{ q_user or '' }}" placeholder="например: tek1">
+    </div>
+    <div style="min-width:220px; flex:1;">
+        <label>Фильтр по action</label><br>
+        <input type="text" name="action" value="{{ q_action or '' }}" placeholder="например: range_">
+    </div>
+    <div>
+        <button class="btn" type="submit">Применить</button>
+        <a class="btn btn-secondary" href="{{ url_for('admin_audit_logs') }}">Сброс</a>
+    </div>
+</form>
+
+{% if not logs %}
+    <p style="margin-top:14px;">Логов пока нет.</p>
+{% else %}
+    <div style="margin-top:14px; overflow-x:auto;">
+        <table>
+            <tr>
+                <th>Время (UTC)</th>
+                <th>Кто</th>
+                <th>Роль</th>
+                <th>Action</th>
+                <th>Target</th>
+                <th>Детали</th>
+                <th>IP</th>
+            </tr>
+            {% for row in logs %}
+            <tr>
+                <td style="white-space:nowrap;">{{ row.created_at.strftime('%Y-%m-%d %H:%M:%S') if row.created_at else '' }}</td>
+                <td style="white-space:nowrap;">{{ row.actor_username or ('user_id=' ~ row.actor_user_id) }}</td>
+                <td style="white-space:nowrap;">{{ row.actor_role or '' }}</td>
+                <td style="white-space:nowrap; font-family:monospace;">{{ row.action }}</td>
+                <td style="white-space:nowrap; font-family:monospace; opacity:.9;">
+                    {% if row.target_type %}
+                        {{ row.target_type }}{% if row.target_id %}:{{ row.target_id }}{% endif %}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td style="min-width:260px; max-width:520px; word-break:break-word;">
+                    {{ row.details or '' }}
+                </td>
+                <td style="white-space:nowrap; opacity:.75;">{{ row.ip or '' }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+{% endif %}
+
+{% endblock %}

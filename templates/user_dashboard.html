@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Мои диапазоны{% endblock %}
+{% block content %}
+<h2>Ваши диапазоны</h2>
+<p>Выберите диапазон, чтобы открыть настройки, автовходы и логи.</p>
+
+{% if not ranges %}
+    <p style="margin-top:10px;">Админ ещё не выдал вам диапазоны.</p>
+{% else %}
+    <div style="margin-top:14px;">
+        {% for r in ranges %}
+            <a href="{{ url_for('user_range', range_id=r.id) }}" class="range-pill">
+                Диапазон {{ r.start }}–{{ r.end }}
+            </a>
+        {% endfor %}
+    </div>
+{% endif %}
+{% endblock %}

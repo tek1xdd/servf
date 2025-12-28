@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Админка{% endblock %}
+{% block content %}
+<h2>Админка — пользователи</h2>
+
+<div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+    <div>
+        <p style="margin:6px 0 0;">Можно искать по: <span style="font-family:monospace;">логину</span>, <span style="font-family:monospace;">ID</span>, номеру в диапазоне (например <span style="font-family:monospace;">65</span>) или по диапазону (например <span style="font-family:monospace;">61-70</span>).</p>
+    </div>
+    <div>
+        <a class="btn" href="{{ url_for('admin_create_user') }}">+ Новый пользователь</a>
+    </div>
+</div>
+
+<form method="get" style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+    <div style="min-width:220px; flex:1;">
+        <label>Поиск</label><br>
+        <input type="text" name="q" value="{{ q_raw or '' }}" placeholder="например: tek1 / 12 / 65 / 61-70">
+    </div>
+    <div style="min-width:220px;">
+        <label>Роль</label><br>
+        <select name="role"
+                style="width:100%; padding:8px 10px; margin-top:4px; border-radius:999px;
+                       border:1px solid rgba(255,255,255,0.07);
+                       background: rgba(15, 20, 30, 0.8); color:#f3f3f3;">
+            <option value="all" {% if role == 'all' %}selected{% endif %}>Все</option>
+            <option value="user" {% if role == 'user' %}selected{% endif %}>User</option>
+            <option value="admin" {% if role == 'admin' %}selected{% endif %}>Admin</option>
+            <option value="super-admin" {% if role in ['super-admin','super','super_admin'] %}selected{% endif %}>Super-admin</option>
+        </select>
+    </div>
+    <div>
+        <button class="btn" type="submit">Найти</button>
+        <a class="btn btn-secondary" href="{{ url_for('admin_dashboard') }}">Сброс</a>
+    </div>
+</form>
+
+{% if q_raw or (role and role != 'all') %}
+    <p style="margin-top:10px; margin-bottom:0;">Найдено: <b>{{ users|length }}</b> из {{ total_users }}</p>
+{% else %}
+    <p style="margin-top:10px; margin-bottom:0;">Всего пользователей: {{ total_users }}</p>
+{% endif %}
+
+<table>
+    <tr>
+        <th>ID</th>
+        <th>Логин</th>
+        <th>Роль</th>
+        <th>Диапазоны</th>
+        <th></th>
+    </tr>
+    {% for u in users %}
+    <tr>
+        <td>{{ u.id }}</td>
+        <td>{{ u.username }}</td>
+        <td>
+            {% if u.is_super_admin %}
+                Super-admin
+            {% elif u.is_admin %}
+                Admin
+            {% else %}
+                User
+            {% endif %}
+        </td>
+        <td>
+            {% for r in u.ranges %}
+                {% if current_user and current_user.is_super_admin %}
+                    <a href="{{ url_for('user_range', range_id=r.id) }}" style="font-family:monospace;">
+                        {{ r.start }}–{{ r.end }}
+                    </a>
+                {% else %}
+                    {{ r.start }}–{{ r.end }}
+                {% endif %}
+                {% if not loop.last %}, {% endif %}
+            {% endfor %}
+        </td>
+        <td>
+            {% if current_user.is_super_admin or not u.is_staff %}
+                <a href="{{ url_for('admin_edit_user', user_id=u.id) }}">Редактировать</a> |
+                <a href="{{ url_for('admin_user_ranges', user_id=u.id) }}">Диапазоны</a>
+            {% else %}
+                <span style="opacity:.6;">(только super-admin)</span>
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% endblock %}
