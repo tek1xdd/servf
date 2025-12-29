@@ -432,6 +432,10 @@ def can_manage_user(actor: Optional[User], target: User) -> bool:
         return False
     if actor.is_super_admin:
         return True
+    # обычный admin НЕ управляет чужими staff-аккаунтами, но
+    # может редактировать самого себя (например, сменить пароль).
+    if actor.id == target.id:
+        return True
     # обычный admin может управлять только простыми пользователями
     return not bool(target.is_staff)
 
@@ -441,6 +445,10 @@ def can_manage_ranges_of_user(actor: Optional[User], target: User) -> bool:
     if not actor or not actor.is_staff:
         return False
     if actor.is_super_admin:
+        return True
+    # обычный admin не выдаёт диапазоны другим staff-аккаунт... но
+    # может управлять диапазонами самого себя.
+    if actor.id == target.id:
         return True
     # admin может выдавать диапазоны только простым пользователям
     return not bool(target.is_staff)
