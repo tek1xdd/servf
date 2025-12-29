@@ -75,7 +75,11 @@
             {% endfor %}
         </td>
         <td>
-            {% if current_user.is_super_admin or not u.is_staff %}
+            {#
+              Обычный admin не управляет ЧУЖИМИ staff-аккаунтами,
+              но может управлять собой (в т.ч. выдавать себе диапазоны).
+            #}
+            {% if current_user.is_super_admin or (not u.is_staff) or (current_user.id == u.id) %}
                 <a href="{{ url_for('admin_edit_user', user_id=u.id) }}">Редактировать</a> |
                 <a href="{{ url_for('admin_user_ranges', user_id=u.id) }}">Диапазоны</a>
             {% else %}
