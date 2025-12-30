@@ -1975,6 +1975,73 @@ def api_game_finished():
     })
 
 
+@app.route("/api/game/party_ready", methods=["GET"])
+def api_game_party_ready():
+    """Проверка синхронизации пати для лидера (1 или 6).
+
+    Готово, когда games_played у лидера и у его 4 сокомандников одинаковые.
+    Используется клиентом start_accept.py, чтобы лидер не стартовал игру,
+    пока остальные не вызвали /api/game/finished.
+    """
+    number = request.args.get("number", type=int)
+    if number is None:
+        return jsonify({"ok": False, "error": "number required"}), 400
+
+    rng = (
+        NumberRange.query
+        .filter(NumberRange.start <= number, NumberRange.end >= number)
+        .first()
+    )
+    if not rng:
+        return jsonify({"ok": False, "error": "range not found"}), 404
+
+    last_digit = abs(int(number)) % 10
+    is_leader = last_digit in (1, 6)
+    if not is_leader:
+        return jsonify({"ok": True, "is_leader": False, "all_ready": True, "party": []})
+
+    party_numbers = [int(number)]
+    for i in range(1, 5):
+        n = int(number) + i
+        if n <= int(rng.end):
+            party_numbers.append(n)
+
+    rows = (
+        AccountState.query
+        .filter(AccountState.range_id == rng.id, AccountState.number.in_(party_numbers))
+        .all()
+    )
+
+    games_map = {n: 0 for n in party_numbers}
+    for r in rows:
+        try:
+            n = int(r.number)
+        except Exception:
+            continue
+        if n in games_map:
+            gp = int(r.games_played or 0)
+            if gp > games_map[n]:
+                games_map[n] = gp
+
+    gps = [games_map[n] for n in party_numbers]
+    min_gp = min(gps) if gps else 0
+    max_gp = max(gps) if gps else 0
+    all_ready = (min_gp == max_gp)
+
+    missing = [n for n in party_numbers if games_map[n] != max_gp]
+    party = [{"number": n, "games_played": games_map[n]} for n in party_numbers]
+
+    return jsonify({
+        "ok": True,
+        "is_leader": True,
+        "party": party,
+        "min_games_played": min_gp,
+        "max_games_played": max_gp,
+        "all_ready": all_ready,
+        "missing": missing,
+    })
+
+
 # ====== CLI ======
 @app.cli.command("init-db")
 def init_db():
