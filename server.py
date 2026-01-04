@@ -249,6 +249,24 @@ class LobbyState(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+
+
+class GameFinishMark(db.Model):
+    """Последний /api/game/finished по номеру (дедуп).
+
+    Нужен, чтобы защититься от двойных/ложных отправок finish со стороны клиента.
+    Храним одну строку на (range_id, number) и обновляем timestamp.
+    """
+    __table_args__ = (
+        db.UniqueConstraint("range_id", "number", name="uq_game_finish_mark_range_number"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    range_id = db.Column(db.Integer, db.ForeignKey("number_range.id"), nullable=False)
+    number = db.Column(db.Integer, nullable=False)
+    last_finished_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 class ClientUpdate(db.Model):
     """
     Событие «обновить клиент Dota» для конкретной пятёрки диапазона.
@@ -1445,6 +1463,7 @@ def api_accounts_lobby_update():
     db.session.commit()
     return jsonify({"ok": True})
 @app.route("/api/accounts/lobby_state")
+
 def api_accounts_lobby_state():
     """
     GET /api/accounts/lobby_state?number=51
@@ -1452,13 +1471,16 @@ def api_accounts_lobby_state():
     Ответ:
       { "ok": true, "mode": "same"|"different"|"waiting", "lobby_id": "..."|null }
 
-    Логика:
-      - как только появляется новый lobby_id в диапазоне, даём ~6 секунд,
+    Логика (обновлено):
+      - как только появляется новый lobby_id в диапазоне, даём ~9 секунд,
         чтобы остальные успели его отправить → в это время всегда "waiting"
-      - после окна:
-          * если есть хотя бы один ДРУГОЙ lobby_id → "different"
-          * если нет других, но не у всех номеров есть lobby_id → "different"
-          * если у всех номеров lobby_id == мой → "same"
+      - при сравнении игнорируем "старые" lobby_id, которые были обновлены ДО первого появления
+        текущего lobby_id (иначе предыдущий матч может дать фолс "different", пока часть ботов ещё не обновилась)
+      - критерии:
+          * если после начала "цикла" появляется другой lobby_id → "different"
+          * если обе пятёрки (1–5 и 6–10) увидели один и тот же lobby_id → "same"
+          * если данных недостаточно (ещё ждём) → "waiting"
+          * если окно ожидания вышло, а подтверждения нет → "different"
 
     ВАЖНО:
       Тут мы читаем lobby_id из LobbyState (отдельная таблица), чтобы:
@@ -1478,10 +1500,12 @@ def api_accounts_lobby_state():
         return jsonify({"ok": False, "error": "range not found"}), 404
 
     now = datetime.utcnow()
-    WAIT_SECONDS = 6
+
+    WAIT_SECONDS = 9
+    # небольшой буфер, если кто-то очень медленно присылает lobby_id (но accept-окно ещё живо)
+    EXTRA_WAIT_SECONDS = 3
 
     # Через какое время считать данные "протухшими" (бот упал/не шлёт lobby_id)
-    # Нужно, чтобы старый lobby_id с упавшей виртуалки не ломал всем mode.
     TTL_SECONDS = 15 * 60  # 15 минут
     cutoff = now - timedelta(seconds=TTL_SECONDS)
 
@@ -1509,18 +1533,21 @@ def api_accounts_lobby_state():
 
     first_time = None
     for r in rows_same:
-        if r.lobby_seen_at:
-            if first_time is None or r.lobby_seen_at < first_time:
-                first_time = r.lobby_seen_at
+        t = r.lobby_seen_at or r.updated_at
+        if t is not None and (first_time is None or t < first_time):
+            first_time = t
 
-    # если lobby_id появился меньше WAIT_SECONDS назад — ещё ждём
-    if first_time:
-        age = (now - first_time).total_seconds()
-        if age < WAIT_SECONDS:
-            return jsonify({"ok": True, "mode": "waiting", "lobby_id": my_lobby})
+    # fallback на случай старых баз/старых строк без lobby_seen_at
+    if first_time is None:
+        first_time = my_state.lobby_seen_at or my_state.updated_at or now
+
+    age = (now - first_time).total_seconds()
+    if age < WAIT_SECONDS:
+        return jsonify({"ok": True, "mode": "waiting", "lobby_id": my_lobby})
 
     # --- 2) Окно прошло — сверяем по всему диапазону ---
-    numbers = list(range(rng.start, rng.end + 1))
+    numbers = list(range(int(rng.start), int(rng.end) + 1))
+    total = len(numbers)
 
     rows = (
         LobbyState.query
@@ -1533,18 +1560,40 @@ def api_accounts_lobby_state():
         .all()
     )
 
-    latest_per_number = {int(r.number): r.lobby_id for r in rows}
+    row_map = {int(r.number): r for r in rows}
 
-    # 1) Если есть хоть один lobby_id, отличающийся от моего → different
-    if any(lobby != my_lobby for lobby in latest_per_number.values()):
+    # считаем только то, что было обновлено ПОСЛЕ появления текущего lobby_id
+    # (старые значения от прошлого матча не должны считаться "different")
+    cycle_rows = {
+        n: r for n, r in row_map.items()
+        if (r.updated_at is not None and r.updated_at >= first_time and r.lobby_id)
+    }
+
+    # 1) Если есть хоть один lobby_id, отличающийся от моего (в рамках текущего цикла) → different
+    if any(r.lobby_id != my_lobby for r in cycle_rows.values()):
         return jsonify({"ok": True, "mode": "different", "lobby_id": my_lobby})
 
-    # 2) Если НЕТ конфликтов, но не все номера диапазона прислали lobby_id → тоже different
-    if len(latest_per_number) < len(numbers):
-        return jsonify({"ok": True, "mode": "different", "lobby_id": my_lobby})
+    # 2) Для стандартного диапазона 10 аккаунтов: как только ОБЕ пятёрки увидели lobby_id → same
+    # (не ждём идеальные 10/10, чтобы не ловить фолс "не наш матч" из-за задержек)
+    if total == 10:
+        half1 = numbers[:5]
+        half2 = numbers[5:]
+        half1_ok = any(n in cycle_rows for n in half1)
+        half2_ok = any(n in cycle_rows for n in half2)
+        if half1_ok and half2_ok:
+            return jsonify({"ok": True, "mode": "same", "lobby_id": my_lobby})
 
-    # 3) Иначе: каждый номер имеет lobby_id == my_lobby → same
-    return jsonify({"ok": True, "mode": "same", "lobby_id": my_lobby})
+    # 3) Общий случай: если ВСЕ номера диапазона обновились в этом цикле и конфликтов нет → same
+    if len(cycle_rows) >= total and total > 0:
+        return jsonify({"ok": True, "mode": "same", "lobby_id": my_lobby})
+
+    # 4) Если подтверждения пока нет — чуть-чуть ждём, потом считаем different
+    if age < (WAIT_SECONDS + EXTRA_WAIT_SECONDS):
+        return jsonify({"ok": True, "mode": "waiting", "lobby_id": my_lobby})
+
+    return jsonify({"ok": True, "mode": "different", "lobby_id": my_lobby})
+
+
 @app.route("/api/accounts/lobby_reset", methods=["POST"])
 def api_accounts_lobby_reset():
     """
@@ -1913,6 +1962,7 @@ def api_game_config():
 
 
 @app.route("/api/game/finished", methods=["POST"])
+
 def api_game_finished():
     data = request.get_json(force=True, silent=True) or {}
     number = data.get("number")
@@ -1934,6 +1984,60 @@ def api_game_finished():
         return jsonify({"ok": False, "error": "range not found"}), 404
 
     now = datetime.utcnow()
+
+    # ---------------- Дедупликация ----------------
+    # Иногда клиенты могут отправить finish дважды (фолс-детект/два потока).
+    # Чтобы это не ломало games_played и не стопорило лидера — защищаемся на сервере.
+    DEDUP_SECONDS = 60  # достаточно, т.к. две реальные игры за минуту невозможны
+
+    mark = GameFinishMark.query.filter_by(range_id=rng.id, number=number_int).first()
+    if mark and mark.last_finished_at:
+        try:
+            age = (now - mark.last_finished_at).total_seconds()
+        except Exception:
+            age = None
+
+        if age is not None and age < DEDUP_SECONDS:
+            # heartbeat обновим, но счётчики не трогаем
+            rows = (
+                AccountState.query
+                .filter_by(range_id=rng.id, number=number_int)
+                .all()
+            )
+            if not rows:
+                row = AccountState(
+                    range_id=rng.id,
+                    number=number_int,
+                    steam_id="unknown",
+                    last_update=now,
+                )
+                db.session.add(row)
+                rows = [row]
+
+            for r in rows:
+                r.last_update = now
+
+            # обновим метку тоже (чтобы если клиент зациклился — не начал инкрементить через минуту)
+            mark.last_finished_at = now
+
+            is_master = (number_int == rng.start)
+            db.session.commit()
+            return jsonify({
+                "ok": True,
+                "duplicate": True,
+                "is_master": is_master,
+                "games_completed": rng.games_completed,
+                "win_group": rng.win_group,
+            })
+
+    # если метки нет — создадим, если есть — обновим
+    if not mark:
+        mark = GameFinishMark(range_id=rng.id, number=number_int, last_finished_at=now)
+        db.session.add(mark)
+    else:
+        mark.last_finished_at = now
+
+    # ---------------- Основная логика ----------------
     rows = (
         AccountState.query
         .filter_by(range_id=rng.id, number=number_int)
@@ -1969,6 +2073,7 @@ def api_game_finished():
 
     return jsonify({
         "ok": True,
+        "duplicate": False,
         "is_master": is_master,
         "games_completed": rng.games_completed,
         "win_group": rng.win_group,
