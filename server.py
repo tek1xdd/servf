@@ -265,6 +265,8 @@ class GameFinishMark(db.Model):
     range_id = db.Column(db.Integer, db.ForeignKey("number_range.id"), nullable=False)
     number = db.Column(db.Integer, nullable=False)
     last_finished_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Индекс игры (games_completed на момент старта матча), присылается клиентом для идемпотентности
+    last_game_index = db.Column(db.Integer)
 
 
 class ClientUpdate(db.Model):
@@ -342,6 +344,17 @@ def ensure_schema() -> None:
                 with db.engine.begin() as conn:
                     conn.execute(text("ALTER TABLE user ADD COLUMN is_super_admin BOOLEAN DEFAULT 0"))
                     conn.execute(text("UPDATE user SET is_super_admin = 0 WHERE is_super_admin IS NULL"))
+
+        # ---- game_finish_mark: last_game_index (idempotent finish per game) ----
+        if "game_finish_mark" in insp.get_table_names():
+            cols_gfm = {c.get("name") for c in insp.get_columns("game_finish_mark")}
+            if "last_game_index" not in cols_gfm:
+                with db.engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE game_finish_mark ADD COLUMN last_game_index INTEGER"))
+
+
+
+
     except Exception:
         # если что-то пошло не так (нестандартная БД) — не валим весь сервер
         pass
@@ -1416,6 +1429,14 @@ def api_accounts_lobby_update():
     except Exception:
         return jsonify({"ok": False, "error": "bad number"}), 400
 
+    # game_index — это games_completed на момент старта текущей игры (приходит из /api/game/config).
+    # Нужен для идемпотентности: один матч = один game_index, даже если finish прилетит повторно через 10+ минут.
+    game_index = data.get("game_index")
+    try:
+        game_index_int = int(game_index) if game_index is not None else None
+    except Exception:
+        game_index_int = None
+
     rng = (
         NumberRange.query
         .filter(NumberRange.start <= number_int, NumberRange.end >= number_int)
@@ -1649,6 +1670,14 @@ def api_client_update_leader():
     except Exception:
         return jsonify({"ok": False, "error": "bad number"}), 400
 
+    # game_index — это games_completed на момент старта текущей игры (приходит из /api/game/config).
+    # Нужен для идемпотентности: один матч = один game_index, даже если finish прилетит повторно через 10+ минут.
+    game_index = data.get("game_index")
+    try:
+        game_index_int = int(game_index) if game_index is not None else None
+    except Exception:
+        game_index_int = None
+
     rng = (
         NumberRange.query
         .filter(NumberRange.start <= number_int, NumberRange.end >= number_int)
@@ -1879,6 +1908,14 @@ def api_game_config():
     except Exception:
         return jsonify({"ok": False, "error": "bad number"}), 400
 
+    # game_index — это games_completed на момент старта текущей игры (приходит из /api/game/config).
+    # Нужен для идемпотентности: один матч = один game_index, даже если finish прилетит повторно через 10+ минут.
+    game_index = data.get("game_index")
+    try:
+        game_index_int = int(game_index) if game_index is not None else None
+    except Exception:
+        game_index_int = None
+
     rng = (
         NumberRange.query
         .filter(NumberRange.start <= number_int, NumberRange.end >= number_int)
@@ -1975,6 +2012,14 @@ def api_game_finished():
     except Exception:
         return jsonify({"ok": False, "error": "bad number"}), 400
 
+    # game_index — это games_completed на момент старта текущей игры (приходит из /api/game/config).
+    # Нужен для идемпотентности: один матч = один game_index, даже если finish прилетит повторно через 10+ минут.
+    game_index = data.get("game_index")
+    try:
+        game_index_int = int(game_index) if game_index is not None else None
+    except Exception:
+        game_index_int = None
+
     rng = (
         NumberRange.query
         .filter(NumberRange.start <= number_int, NumberRange.end >= number_int)
@@ -1986,12 +2031,63 @@ def api_game_finished():
     now = datetime.utcnow()
 
     # ---------------- Дедупликация ----------------
-    # Иногда клиенты могут отправить finish дважды (фолс-детект/два потока).
-    # Чтобы это не ломало games_played и не стопорило лидера — защищаемся на сервере.
-    DEDUP_SECONDS = 60  # достаточно, т.к. две реальные игры за минуту невозможны
+    # Иногда клиенты могут отправить finish дважды (фолс-детект/два потока/перезапуск).
+    # Раньше была только дедупликация по времени (60с) — этого мало, потому что ложный finish
+    # может прилететь за много минут до реального окончания матча.
+    #
+    # Поэтому:
+    #  1) если клиент прислал game_index — делаем идемпотентность по (range_id, number, game_index)
+    #  2) если game_index не прислан — оставляем старую защиту по времени (на всякий случай)
+    DEDUP_SECONDS = 60
 
     mark = GameFinishMark.query.filter_by(range_id=rng.id, number=number_int).first()
-    if mark and mark.last_finished_at:
+
+    # (1) Идемпотентность по game_index
+    if game_index_int is not None and mark and getattr(mark, "last_game_index", None) is not None:
+        try:
+            last_gi = int(mark.last_game_index)
+        except Exception:
+            last_gi = None
+
+        # <= : повтор или "старый" finish (после рестарта клиента)
+        if last_gi is not None and game_index_int <= last_gi:
+            # heartbeat обновим, но счётчики не трогаем
+            rows = (
+                AccountState.query
+                .filter_by(range_id=rng.id, number=number_int)
+                .all()
+            )
+            if not rows:
+                row = AccountState(
+                    range_id=rng.id,
+                    number=number_int,
+                    steam_id="unknown",
+                    last_update=now,
+                )
+                db.session.add(row)
+                rows = [row]
+
+            for r in rows:
+                r.last_update = now
+
+            # обновим метку
+            mark.last_finished_at = now
+
+            is_master = (number_int == rng.start)
+            db.session.commit()
+            return jsonify({
+                "ok": True,
+                "duplicate": True,
+                "duplicate_reason": "game_index",
+                "is_master": is_master,
+                "games_completed": rng.games_completed,
+                "win_group": rng.win_group,
+                "game_index": game_index_int,
+                "last_game_index": last_gi,
+            })
+
+    # (2) Фоллбек-дедуп по времени, если game_index не прислали
+    if (game_index_int is None) and mark and mark.last_finished_at:
         try:
             age = (now - mark.last_finished_at).total_seconds()
         except Exception:
@@ -2025,6 +2121,7 @@ def api_game_finished():
             return jsonify({
                 "ok": True,
                 "duplicate": True,
+                "duplicate_reason": "time",
                 "is_master": is_master,
                 "games_completed": rng.games_completed,
                 "win_group": rng.win_group,
@@ -2037,6 +2134,12 @@ def api_game_finished():
     else:
         mark.last_finished_at = now
 
+    # если клиент прислал game_index — сохраняем (для дедупликации следующих finish)
+    if game_index_int is not None:
+        try:
+            mark.last_game_index = int(game_index_int)
+        except Exception:
+            pass
     # ---------------- Основная логика ----------------
     rows = (
         AccountState.query
