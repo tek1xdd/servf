@@ -2160,15 +2160,76 @@ def api_game_finished():
         r.games_played = (r.games_played or 0) + 1
         r.last_update = now
 
-    # мастер — первый номер диапазона; только он переключает WIN/LOOSE
+    # мастер — первый номер диапазона (для совместимости/отладочной инфы)
     is_master = (number_int == rng.start)
-    if is_master:
-        rng.games_completed = (rng.games_completed or 0) + 1
-        win_group = rng.win_group or "right"
-        rng.win_group = "left" if win_group == "right" else "right"
 
+    # --------------------------------------------------------------
+    # ВАЖНО:
+    # Раньше WIN/LOOSE переключал только мастер. Если он по какой-то причине
+    # не отправил finish — флаг на сервере не менялся.
+    #
+    # Теперь продвигаем диапазон, когда прилетает ПЕРВЫЙ finish с game_index,
+    # равным текущему rng.games_completed (т.е. матч с этим индексом завершился).
+    # Это делает переключение независимым от конкретного номера.
+    #
+    # Чтобы два одновременных finish не инкрементили дважды — делаем атомарный UPDATE
+    # по условию games_completed == game_index.
+    # --------------------------------------------------------------
+    advanced_range = False
+    finished_game_index = None
+
+    if game_index_int is not None:
+        try:
+            from sqlalchemy import case, func
+        except Exception:
+            case = None
+            func = None
+
+        try:
+            if case is not None and func is not None:
+                updated = (
+                    NumberRange.query
+                    .filter(NumberRange.id == rng.id)
+                    .filter(func.coalesce(NumberRange.games_completed, 0) == int(game_index_int))
+                    .update({
+                        NumberRange.games_completed: func.coalesce(NumberRange.games_completed, 0) + 1,
+                        # toggle: left -> right, (right or NULL) -> left
+                        NumberRange.win_group: case(
+                            (NumberRange.win_group == "left", "right"),
+                            else_="left"
+                        ),
+                    }, synchronize_session=False)
+                )
+                if updated:
+                    advanced_range = True
+                    finished_game_index = int(game_index_int)
+                    # Обновим объект rng в сессии, чтобы в ответе были актуальные значения
+                    try:
+                        db.session.expire(rng)
+                    except Exception:
+                        pass
+            else:
+                raise RuntimeError("sqlalchemy func/case not available")
+        except Exception:
+            # Фоллбек (не атомарно): если что-то пошло не так — оставляем старую логику мастера
+            if is_master:
+                rng.games_completed = (rng.games_completed or 0) + 1
+                win_group = rng.win_group or "right"
+                rng.win_group = "left" if win_group == "right" else "right"
+                advanced_range = True
+                finished_game_index = int(rng.games_completed or 0) - 1
+
+    else:
+        # Старые клиенты без game_index: по-прежнему переключает только мастер (как было)
+        if is_master:
+            rng.games_completed = (rng.games_completed or 0) + 1
+            win_group = rng.win_group or "right"
+            rng.win_group = "left" if win_group == "right" else "right"
+            advanced_range = True
+            finished_game_index = int(rng.games_completed or 0) - 1
+
+    if advanced_range and (finished_game_index is not None):
         # очистим bucket позиций для завершённой игры
-        finished_game_index = int(rng.games_completed or 0) - 1
         _GAME_POSITIONS.pop((int(rng.id), int(finished_game_index)), None)
         _cleanup_old_game_buckets(rng.id)
 
@@ -2178,8 +2239,10 @@ def api_game_finished():
         "ok": True,
         "duplicate": False,
         "is_master": is_master,
+        "advanced_range": advanced_range,
         "games_completed": rng.games_completed,
         "win_group": rng.win_group,
+        "game_index": game_index_int,
     })
 
 
