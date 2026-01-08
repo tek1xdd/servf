@@ -1114,6 +1114,26 @@ def user_range_game_settings(range_id):
         rows = AccountState.query.filter_by(range_id=rng.id).all()
         for r in rows:
             r.games_played = 0
+        # IMPORTANT: при reset нужно сбросить дедуп-метки finish,
+        # иначе после сброса games_completed=0 сервер будет считать новые finish
+        # "старыми" (last_game_index останется от прошлой сессии) и win_group не будет переключаться.
+        try:
+            GameFinishMark.query.filter_by(range_id=rng.id).delete(synchronize_session=False)
+        except Exception:
+            pass
+        # Также можно почистить lobby_state, чтобы не тянуть старые lobby_id
+        try:
+            LobbyState.query.filter_by(range_id=rng.id).delete(synchronize_session=False)
+        except Exception:
+            pass
+        # и очистить in-memory buckets позиций для этого диапазона
+        try:
+            rid = int(rng.id)
+            for key in list(_GAME_POSITIONS.keys()):
+                if key and int(key[0]) == rid:
+                    _GAME_POSITIONS.pop(key, None)
+        except Exception:
+            pass
         audit(
             "range_reset_games",
             actor=user,
@@ -1993,6 +2013,7 @@ def api_game_config():
             "position": position,
             "games_played": int(games_played),
             "games_completed": int(games_completed),
+            "game_index": int(games_completed),
             "win_group": win_group,
         },
     })
@@ -2248,11 +2269,11 @@ def api_game_finished():
 
 @app.route("/api/game/party_ready", methods=["GET"])
 def api_game_party_ready():
-    """Проверка синхронизации пати для лидера (1 или 6).
+    """DEPRECATED: раньше использовалось start_accept.py, чтобы лидер ждал,
+    пока все доиграют прошлую катку.
 
-    Готово, когда games_played у лидера и у его 4 сокомандников одинаковые.
-    Используется клиентом start_accept.py, чтобы лидер не стартовал игру,
-    пока остальные не вызвали /api/game/finished.
+    По твоему ТЗ эту логику убираем: endpoint оставляем только для обратной совместимости,
+    но он всегда возвращает all_ready=True (без блокировок).
     """
     number = request.args.get("number", type=int)
     if number is None:
@@ -2268,9 +2289,8 @@ def api_game_party_ready():
 
     last_digit = abs(int(number)) % 10
     is_leader = last_digit in (1, 6)
-    if not is_leader:
-        return jsonify({"ok": True, "is_leader": False, "all_ready": True, "party": []})
 
+    # Для UI/debug всё равно вернём состав пати и games_played, но НЕ будем блокировать старт.
     party_numbers = [int(number)]
     for i in range(1, 5):
         n = int(number) + i
@@ -2294,24 +2314,15 @@ def api_game_party_ready():
             if gp > games_map[n]:
                 games_map[n] = gp
 
-    gps = [games_map[n] for n in party_numbers]
-    min_gp = min(gps) if gps else 0
-    max_gp = max(gps) if gps else 0
-    all_ready = (min_gp == max_gp)
-
-    missing = [n for n in party_numbers if games_map[n] != max_gp]
     party = [{"number": n, "games_played": games_map[n]} for n in party_numbers]
 
     return jsonify({
         "ok": True,
-        "is_leader": True,
+        "is_leader": bool(is_leader),
         "party": party,
-        "min_games_played": min_gp,
-        "max_games_played": max_gp,
-        "all_ready": all_ready,
-        "missing": missing,
+        "all_ready": True,
+        "missing": [],
     })
-
 
 # ====== CLI ======
 @app.cli.command("init-db")
