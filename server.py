@@ -35,6 +35,12 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 _GAME_POSITIONS = {}
 
+# ====== SYNC ЛАЙНИНГ ГРУПП ======
+# Эти константы ДОЛЖНЫ совпадать с etobaza.py (клиент).
+LANING_GROUPS_COUNT = 19
+LANING_GROUP_SECONDS = 75.0
+
+
 def _get_game_bucket(range_id: int, game_index: int) -> dict:
     key = (int(range_id), int(game_index))
     bucket = _GAME_POSITIONS.get(key)
@@ -269,6 +275,22 @@ class GameFinishMark(db.Model):
     last_game_index = db.Column(db.Integer)
 
 
+class LaningState(db.Model):
+    """Синхронизация «групп» лайнинга внутри одного матча.
+
+    Одна строка на (range_id, game_index). started_at ставится по первому заходу в матч.
+    По elapsed времени сервер вычисляет текущую группу (1..LANING_GROUPS_COUNT).
+    """
+    __tablename__ = "laning_state_v1"
+    __table_args__ = (
+        db.UniqueConstraint("range_id", "game_index", name="uq_laning_state_range_game"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    range_id = db.Column(db.Integer, db.ForeignKey("number_range.id"), nullable=False)
+    game_index = db.Column(db.Integer, nullable=False)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 class ClientUpdate(db.Model):
     """
     Событие «обновить клиент Dota» для конкретной пятёрки диапазона.
@@ -366,6 +388,23 @@ def ensure_schema() -> None:
 # чтобы `flask run` и CLI-команды работали без ручных миграций.
 with app.app_context():
     ensure_schema()
+
+def _get_or_create_laning_state(range_id: int, game_index: int):
+    """Возвращает (row, created_bool)."""
+    try:
+        gi = int(game_index)
+    except Exception:
+        gi = 0
+    row = LaningState.query.filter_by(range_id=int(range_id), game_index=int(gi)).first()
+    if row:
+        return row, False
+    row = LaningState(range_id=int(range_id), game_index=int(gi), started_at=datetime.utcnow())
+    db.session.add(row)
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    return row, True
 
 
 # ====== ХЕЛПЕРЫ ======
@@ -1914,6 +1953,70 @@ def api_client_update_ack():
     })
 
 # ====== API ДЛЯ ИГРОВОЙ ЛОГИКИ (СТОРОНА, ПОЗИЦИИ, WIN/LOOSE) ======
+@app.route("/api/game/laning_state")
+def api_game_laning_state():
+    """Серверный «таймер» лайнинга, чтобы ВСЕ боты шли по группам синхронно.
+
+    Клиент просто спрашивает текущую группу. Если группа сменилась — он
+    прерывает текущие действия и начинает новую группу.
+
+    GET /api/game/laning_state?number=51&game_index=0
+    """
+    number = request.args.get("number", type=int)
+    if number is None:
+        return jsonify({"ok": False, "error": "number required"}), 400
+
+    rng = (
+        NumberRange.query
+        .filter(NumberRange.start <= int(number), NumberRange.end >= int(number))
+        .first()
+    )
+    if not rng:
+        return jsonify({"ok": False, "error": "range not found"}), 404
+
+    game_index = request.args.get("game_index", default=None, type=int)
+    if game_index is None:
+        try:
+            game_index = int(rng.games_completed or 0)
+        except Exception:
+            game_index = 0
+
+    row, _created = _get_or_create_laning_state(rng.id, int(game_index))
+
+    now = datetime.utcnow()
+    started_at = row.started_at or now
+    try:
+        elapsed = max(0.0, (now - started_at).total_seconds())
+    except Exception:
+        elapsed = 0.0
+
+    total_seconds = float(LANING_GROUPS_COUNT) * float(LANING_GROUP_SECONDS)
+
+    if elapsed >= total_seconds:
+        phase = "final"
+        group_index = int(LANING_GROUPS_COUNT)
+        seconds_left = 0.0
+    else:
+        phase = "laning"
+        group_index = int(elapsed // float(LANING_GROUP_SECONDS)) + 1
+        group_index = max(1, min(int(LANING_GROUPS_COUNT), int(group_index)))
+
+        into = elapsed - float(group_index - 1) * float(LANING_GROUP_SECONDS)
+        seconds_left = float(LANING_GROUP_SECONDS) - float(into)
+        if seconds_left < 0:
+            seconds_left = 0.0
+
+    return jsonify({
+        "ok": True,
+        "phase": phase,
+        "group_index": int(group_index),
+        "seconds_left": float(seconds_left),
+        "started_at": (started_at.isoformat() + "Z") if started_at else None,
+        "elapsed": float(elapsed),
+        "game_index": int(game_index),
+        "range_id": int(rng.id),
+    })
+
 @app.route("/api/game/config", methods=["POST"])
 def api_game_config():
     data = request.get_json(force=True, silent=True) or {}
@@ -2253,6 +2356,18 @@ def api_game_finished():
         # очистим bucket позиций для завершённой игры
         _GAME_POSITIONS.pop((int(rng.id), int(finished_game_index)), None)
         _cleanup_old_game_buckets(rng.id)
+
+
+# --- Cleanup sync-таймера лайнинга (чтобы таблица не росла бесконечно) ---
+    try:
+        gi_cleanup = None
+        if game_index_int is not None:
+            gi_cleanup = int(game_index_int)
+        else:
+            gi_cleanup = int((rng.games_completed or 1) - 1)
+        LaningState.query.filter_by(range_id=rng.id, game_index=gi_cleanup).delete(synchronize_session=False)
+    except Exception:
+        pass
 
     db.session.commit()
 
