@@ -1153,6 +1153,32 @@ def user_range_game_settings(range_id):
         rows = AccountState.query.filter_by(range_id=rng.id).all()
         for r in rows:
             r.games_played = 0
+        # HARD RESET: очистка всего игрового состояния диапазона (кроме логинов/steam_id)
+        for r in rows:
+            r.lobby_id = None
+            r.side = None
+            r.last_position = None
+            r.last_play_for_win = None
+        # Сбросить серверный таймер лайнинга (иначе game_index=0 может остаться старым и сразу уйти в final)
+        try:
+            LaningState.query.filter_by(range_id=rng.id).delete(synchronize_session=False)
+        except Exception:
+            pass
+        # Сбросить события обновления клиента и ack
+        try:
+            upd_ids = [u.id for u in ClientUpdate.query.filter_by(range_id=rng.id).all()]
+            if upd_ids:
+                ClientUpdateAck.query.filter(ClientUpdateAck.update_id.in_(upd_ids)).delete(synchronize_session=False)
+            ClientUpdate.query.filter_by(range_id=rng.id).delete(synchronize_session=False)
+        except Exception:
+            pass
+        # Сбросить очередь команд (start/stop/autoconfig/etc) чтобы не исполнялись старые pending после reset
+        try:
+            RangeCommand.query.filter_by(range_id=rng.id).delete(synchronize_session=False)
+        except Exception:
+            pass
+
+
         # IMPORTANT: при reset нужно сбросить дедуп-метки finish,
         # иначе после сброса games_completed=0 сервер будет считать новые finish
         # "старыми" (last_game_index останется от прошлой сессии) и win_group не будет переключаться.
@@ -2358,7 +2384,7 @@ def api_game_finished():
         _cleanup_old_game_buckets(rng.id)
 
 
-# --- Cleanup sync-таймера лайнинга (чтобы таблица не росла бесконечно) ---
+    # --- Cleanup sync-таймера лайнинга (чтобы таблица не росла бесконечно) ---
     try:
         gi_cleanup = None
         if game_index_int is not None:
@@ -2368,6 +2394,7 @@ def api_game_finished():
         LaningState.query.filter_by(range_id=rng.id, game_index=gi_cleanup).delete(synchronize_session=False)
     except Exception:
         pass
+
 
     db.session.commit()
 
